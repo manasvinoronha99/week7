@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Body Tracking Colored Silhouette</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.2"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: #000;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #shadowCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+
+        .video-preview {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 200px;
+            height: 150px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(255,255,255,0.2);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            z-index: 10;
+            color: white;
+        }
+
+        .controls h3 {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .control-group {
+            margin: 15px 0;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .toggle-btn {
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            width: 100%;
+        }
+
+        .toggle-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .toggle-btn.active {
+            background: rgba(76, 175, 80, 0.5);
+            border-color: #4CAF50;
+        }
+
+        .color-palette {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .color-dot {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid rgba(255,255,255,0.3);
+            transition: transform 0.2s;
+        }
+
+        .color-dot:hover {
+            transform: scale(1.2);
+        }
+
+        .status {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            padding: 15px 25px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            font-size: 14px;
+            z-index: 10;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 20px;
+            text-align: center;
+            z-index: 100;
+        }
+
+        .loading-spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="loading" id="loading">
+        <div class="loading-spinner"></div>
+        <p>Loading body segmentation model...</p>
+    </div>
+
+    <div class="container">
+        <canvas id="shadowCanvas"></canvas>
+
+        <div class="video-preview">
+            <video id="webcam" autoplay playsinline muted></video>
+        </div>
+
+        <div class="controls">
+            <h3>✨ Shadow Art Studio</h3>
+
+            <div class="control-group">
+                <label>Color Mixing Mode:</label>
+                <button class="toggle-btn active" id="mixModeBtn" onclick="toggleMixMode()">
+                    Additive Blending
+                </button>
+            </div>
+
+            <div class="control-group">
+                <label>Background Effect:</label>
+                <button class="toggle-btn" id="trailBtn" onclick="toggleTrails()">
+                    Motion Trails: OFF
+                </button>
+            </div>
+
+            <div class="control-group">
+                <label>Primary Color:</label>
+                <div class="color-palette">
+                    <div class="color-dot" style="background: #FF6B6B;" onclick="setColor('#FF6B6B')"></div>
+                    <div class="color-dot" style="background: #4ECDC4;" onclick="setColor('#4ECDC4')"></div>
+                    <div class="color-dot" style="background: #FFE66D;" onclick="setColor('#FFE66D')"></div>
+                    <div class="color-dot" style="background: #A8E6CF;" onclick="setColor('#A8E6CF')"></div>
+                    <div class="color-dot" style="background: #FF8B94;" onclick="setColor('#FF8B94')"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="status">
+            <div>People detected: <strong id="peopleCount">0</strong></div>
+            <div>FPS: <strong id="fps">0</strong></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('shadowCanvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('webcam');
+
+        let segmenter = null;
+        let animationId = null;
+        let lastFrameTime = Date.now();
+        let fps = 0;
+
+        // Settings
+        let mixMode = 'additive'; // or 'multiply'
+        let enableTrails = false;
+        let primaryColor = '#FF6B6B';
+
+        // Color palette for multiple people
+        const colorPalette = [
+            { r: 255, g: 107, b: 107 }, // Red
+            { r: 78, g: 205, b: 196 },  // Cyan
+            { r: 255, g: 230, b: 109 }, // Yellow
+            { r: 168, g: 230, b: 207 }, // Mint
+            { r: 255, g: 139, b: 148 }  // Pink
+        ];
+
+        let currentColorIndex = 0;
+
+        // Resize canvas
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Initialize webcam
+        async function setupCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+                video.srcObject = stream;
+
+                return new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        resolve();
+                    };
+                });
+            } catch (error) {
+                console.error('Error accessing webcam:', error);
+                document.getElementById('loading').innerHTML =
+                    '<p>Error accessing webcam. Please allow camera access.</p>';
+            }
+        }
+
+        // Initialize body segmentation
+        async function loadBodySegmentation() {
+            try {
+                const model = bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation;
+                const segmenterConfig = {
+                    runtime: 'tfjs',
+                    modelType: 'general'
+                };
+
+                segmenter = await bodySegmentation.createSegmenter(model, segmenterConfig);
+                return true;
+            } catch (error) {
+                console.error('Error loading model:', error);
+                document.getElementById('loading').innerHTML =
+                    '<p>Error loading model. Please refresh the page.</p>';
+                return false;
+            }
+        }
+
+        // Color mixing functions
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 255, g: 107, b: 107 };
+        }
+
+        function blendColors(color1, color2, mode = 'additive') {
+            if (mode === 'additive') {
+                return {
+                    r: Math.min(255, color1.r + color2.r),
+                    g: Math.min(255, color1.g + color2.g),
+                    b: Math.min(255, color1.b + color2.b)
+                };
+            } else {
+                // Multiply blend mode
+                return {
+                    r: (color1.r * color2.r) / 255,
+                    g: (color1.g * color2.g) / 255,
+                    b: (color1.b * color2.b) / 255
+                };
+            }
+        }
+
+        // Process segmentation and draw silhouettes
+        async function processFrame() {
+            if (!segmenter) return;
+
+            // Calculate FPS
+            const now = Date.now();
+            fps = Math.round(1000 / (now - lastFrameTime));
+            lastFrameTime = now;
+            document.getElementById('fps').textContent = fps;
+
+            try {
+                const people = await segmenter.segmentPeople(video, {
+                    multiSegmentation: true,
+                    segmentBodyParts: false
+                });
+
+                document.getElementById('peopleCount').textContent = people.length;
+
+                // Clear or fade canvas based on trail setting
+                if (enableTrails) {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                } else {
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+
+                if (people.length > 0) {
+                    // Create a composite image with all silhouettes
+                    const scaleX = canvas.width / video.videoWidth;
+                    const scaleY = canvas.height / video.videoHeight;
+
+                    // Create an off-screen canvas for color blending
+                    const offscreenCanvas = document.createElement('canvas');
+                    offscreenCanvas.width = canvas.width;
+                    offscreenCanvas.height = canvas.height;
+                    const offCtx = offscreenCanvas.getContext('2d');
+
+                    // Process each person
+                    people.forEach((person, index) => {
+                        const mask = person.mask;
+                        const maskData = mask.toImageData();
+
+                        // Get color for this person
+                        const personColor = colorPalette[index % colorPalette.length];
+
+                        // Create colored silhouette
+                        const imageData = offCtx.createImageData(canvas.width, canvas.height);
+
+                        for (let i = 0; i < maskData.data.length; i += 4) {
+                            const maskValue = maskData.data[i];
+
+                            if (maskValue > 128) { // Person detected
+                                // Calculate scaled position
+                                const pixelIndex = i / 4;
+                                const srcX = pixelIndex % maskData.width;
+                                const srcY = Math.floor(pixelIndex / maskData.width);
+
+                                const destX = Math.floor(srcX * scaleX);
+                                const destY = Math.floor(srcY * scaleY);
+                                const destIndex = (destY * canvas.width + destX) * 4;
+
+                                if (destIndex >= 0 && destIndex < imageData.data.length) {
+                                    // Apply color with smooth edges
+                                    const alpha = maskValue / 255;
+
+                                    if (mixMode === 'additive') {
+                                        imageData.data[destIndex] = Math.min(255,
+                                            imageData.data[destIndex] + personColor.r * alpha);
+                                        imageData.data[destIndex + 1] = Math.min(255,
+                                            imageData.data[destIndex + 1] + personColor.g * alpha);
+                                        imageData.data[destIndex + 2] = Math.min(255,
+                                            imageData.data[destIndex + 2] + personColor.b * alpha);
+                                    } else {
+                                        imageData.data[destIndex] = personColor.r * alpha;
+                                        imageData.data[destIndex + 1] = personColor.g * alpha;
+                                        imageData.data[destIndex + 2] = personColor.b * alpha;
+                                    }
+
+                                    imageData.data[destIndex + 3] = 255;
+                                }
+                            }
+                        }
+
+                        offCtx.putImageData(imageData, 0, 0);
+                    });
+
+                    // Apply blur for smoother silhouettes
+                    ctx.filter = 'blur(4px)';
+                    ctx.drawImage(offscreenCanvas, 0, 0);
+                    ctx.filter = 'none';
+
+                    // Add glow effect
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.filter = 'blur(20px)';
+                    ctx.globalAlpha = 0.5;
+                    ctx.drawImage(offscreenCanvas, 0, 0);
+                    ctx.filter = 'none';
+                    ctx.globalAlpha = 1;
+                    ctx.globalCompositeOperation = 'source-over';
+                }
+
+            } catch (error) {
+                console.error('Error processing frame:', error);
+            }
+
+            animationId = requestAnimationFrame(processFrame);
+        }
+
+        // Control functions
+        function toggleMixMode() {
+            mixMode = mixMode === 'additive' ? 'multiply' : 'additive';
+            const btn = document.getElementById('mixModeBtn');
+            btn.textContent = mixMode === 'additive' ? 'Additive Blending' : 'Multiply Blending';
+            btn.classList.toggle('active');
+        }
+
+        function toggleTrails() {
+            enableTrails = !enableTrails;
+            const btn = document.getElementById('trailBtn');
+            btn.textContent = enableTrails ? 'Motion Trails: ON' : 'Motion Trails: OFF';
+            btn.classList.toggle('active');
+        }
+
+        function setColor(color) {
+            primaryColor = color;
+            const rgb = hexToRgb(color);
+            colorPalette[0] = rgb;
+        }
+
+        // Initialize everything
+        async function init() {
+            await setupCamera();
+            const modelLoaded = await loadBodySegmentation();
+
+            if (modelLoaded) {
+                document.getElementById('loading').style.display = 'none';
+                processFrame();
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
