@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pottery Wheel - Hand Tracking</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        #potteryCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .video-preview {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 200px;
+            height: 150px;
+            border: 3px solid white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            z-index: 10;
+        }
+
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.95);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            z-index: 10;
+        }
+
+        .controls h3 {
+            margin: 0 0 15px 0;
+            color: #333;
+        }
+
+        .stat {
+            margin: 8px 0;
+            font-size: 14px;
+            color: #555;
+        }
+
+        .stat strong {
+            color: #667eea;
+        }
+
+        .buttons {
+            margin-top: 15px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #764ba2;
+        }
+
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255,255,255,0.95);
+            padding: 15px 30px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        .instructions p {
+            margin: 5px 0;
+            font-size: 14px;
+            color: #555;
+        }
+
+        .hand-indicator {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #ddd;
+            margin: 0 5px;
+            transition: background 0.3s;
+        }
+
+        .hand-indicator.active {
+            background: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="potteryCanvas"></canvas>
+
+        <div class="video-preview">
+            <video id="webcam" autoplay playsinline></video>
+        </div>
+
+        <div class="controls">
+            <h3>🏺 Pottery Wheel</h3>
+            <div class="stat">
+                <strong>Width:</strong> <span id="width">100</span>px
+            </div>
+            <div class="stat">
+                <strong>Height:</strong> <span id="height">150</span>px
+            </div>
+            <div class="stat">
+                <strong>Hands Detected:</strong>
+                <span class="hand-indicator" id="hand1"></span>
+                <span class="hand-indicator" id="hand2"></span>
+            </div>
+            <div class="buttons">
+                <button onclick="resetPot()">Reset Shape</button>
+                <button onclick="saveSnapshot()">Save Snapshot</button>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <p><strong>Instructions:</strong></p>
+            <p>Move hands closer together to narrow • Move apart to widen</p>
+            <p>Move hands up to stretch • Move down to shorten</p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('potteryCanvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('webcam');
+
+        // Pottery state
+        let wheelRotation = 0;
+        let potProfile = [];
+        const potSegments = 50;
+        let targetWidth = 100;
+        let targetHeight = 150;
+        let currentWidth = 100;
+        let currentHeight = 150;
+        let handsDistance = 0;
+        let handsHeight = 0.5;
+        let handsDetected = 0;
+
+        // Initialize pot profile
+        function initializePot() {
+            potProfile = [];
+            for (let i = 0; i <= potSegments; i++) {
+                const t = i / potSegments;
+                const y = t;
+
+                // Create a simple vase shape
+                let radius;
+                if (t < 0.2) {
+                    radius = 0.3 + t * 1.5; // Base
+                } else if (t < 0.8) {
+                    radius = 0.6 - Math.sin((t - 0.2) * Math.PI) * 0.2; // Body
+                } else {
+                    radius = 0.4 + (1 - t) * 0.8; // Neck
+                }
+
+                potProfile.push({ y: y, radius: radius });
+            }
+        }
+
+        initializePot();
+
+        // Resize canvas
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // MediaPipe Hands setup
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults((results) => {
+            handsDetected = 0;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                handsDetected = results.multiHandLandmarks.length;
+
+                if (results.multiHandLandmarks.length === 2) {
+                    // Two hands detected
+                    const hand1 = results.multiHandLandmarks[0];
+                    const hand2 = results.multiHandLandmarks[1];
+
+                    // Calculate distance between palms (wrist positions)
+                    const wrist1 = hand1[0];
+                    const wrist2 = hand2[0];
+
+                    const distance = Math.sqrt(
+                        Math.pow(wrist1.x - wrist2.x, 2) +
+                        Math.pow(wrist1.y - wrist2.y, 2)
+                    );
+
+                    // Calculate average height
+                    const avgHeight = (wrist1.y + wrist2.y) / 2;
+
+                    // Update targets with smoothing
+                    handsDistance = distance;
+                    handsHeight = avgHeight;
+
+                    // Map distance to width (closer = narrower)
+                    targetWidth = Math.max(50, Math.min(200, (1 - distance) * 300));
+
+                    // Map height to pot height (lower = shorter)
+                    targetHeight = Math.max(100, Math.min(300, (1 - avgHeight) * 400));
+
+                } else if (results.multiHandLandmarks.length === 1) {
+                    // One hand - use for height only
+                    const hand = results.multiHandLandmarks[0];
+                    const wrist = hand[0];
+
+                    handsHeight = wrist.y;
+                    targetHeight = Math.max(100, Math.min(300, (1 - wrist.y) * 400));
+                }
+            }
+
+            // Update hand indicators
+            document.getElementById('hand1').classList.toggle('active', handsDetected >= 1);
+            document.getElementById('hand2').classList.toggle('active', handsDetected >= 2);
+        });
+
+        // Camera setup
+        const camera = new Camera(video, {
+            onFrame: async () => {
+                await hands.send({image: video});
+            },
+            width: 640,
+            height: 480
+        });
+
+        camera.start();
+
+        // Update pot shape with smoothing
+        function updatePotShape() {
+            currentWidth += (targetWidth - currentWidth) * 0.08;
+            currentHeight += (targetHeight - currentHeight) * 0.08;
+
+            const widthScale = currentWidth / 100;
+            const heightScale = currentHeight / 150;
+
+            for (let i = 0; i <= potSegments; i++) {
+                const t = i / potSegments;
+                const baseRadius = potProfile[i].radius;
+
+                // Apply width scaling with natural pottery deformation
+                const widthFactor = widthScale * (1 - Math.abs(t - 0.5) * 0.3);
+                potProfile[i].radius += (baseRadius * widthFactor - potProfile[i].radius) * 0.1;
+
+                // Apply height scaling
+                potProfile[i].y += (t * heightScale - potProfile[i].y) * 0.1;
+            }
+
+            // Update display
+            document.getElementById('width').textContent = Math.round(currentWidth);
+            document.getElementById('height').textContent = Math.round(currentHeight);
+        }
+
+        // Draw pottery wheel and pot
+        function draw() {
+            // Clear canvas
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            // Draw pottery wheel base
+            ctx.save();
+            ctx.translate(centerX, centerY + 150);
+
+            // Wheel
+            ctx.fillStyle = '#8B4513';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 200, 40, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Wheel detail
+            ctx.strokeStyle = '#654321';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 180, 36, 0, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.restore();
+
+            // Draw pot with rotation
+            wheelRotation += 0.03;
+
+            ctx.save();
+            ctx.translate(centerX, centerY);
+
+            // Draw pot as 3D rotating surface
+            const slices = 36;
+
+            for (let slice = 0; slice < slices; slice++) {
+                const angle = (slice / slices) * Math.PI * 2 + wheelRotation;
+                const nextAngle = ((slice + 1) / slices) * Math.PI * 2 + wheelRotation;
+
+                const brightness = (Math.cos(angle) + 1) * 0.5;
+
+                for (let i = 0; i < potProfile.length - 1; i++) {
+                    const p1 = potProfile[i];
+                    const p2 = potProfile[i + 1];
+
+                    const r1 = p1.radius * currentWidth;
+                    const r2 = p2.radius * currentWidth;
+                    const y1 = p1.y * currentHeight - currentHeight / 2;
+                    const y2 = p2.y * currentHeight - currentHeight / 2;
+
+                    const x1 = Math.cos(angle) * r1;
+                    const z1 = Math.sin(angle) * r1;
+                    const x2 = Math.cos(angle) * r2;
+                    const z2 = Math.sin(angle) * r2;
+
+                    const x3 = Math.cos(nextAngle) * r2;
+                    const z3 = Math.sin(nextAngle) * r2;
+                    const x4 = Math.cos(nextAngle) * r1;
+                    const z4 = Math.sin(nextAngle) * r1;
+
+                    // Only draw front-facing polygons
+                    if (z1 > 0 || z2 > 0) {
+                        const hue = 25;
+                        const lightness = 30 + brightness * 40;
+                        ctx.fillStyle = `hsl(${hue}, 70%, ${lightness}%)`;
+
+                        ctx.beginPath();
+                        ctx.moveTo(x1, y1);
+                        ctx.lineTo(x2, y2);
+                        ctx.lineTo(x3, y2);
+                        ctx.lineTo(x4, y1);
+                        ctx.closePath();
+                        ctx.fill();
+
+                        ctx.strokeStyle = `hsl(${hue}, 70%, ${lightness - 10}%)`;
+                        ctx.lineWidth = 0.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            ctx.restore();
+        }
+
+        // Animation loop
+        function animate() {
+            updatePotShape();
+            draw();
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+
+        // Reset pot to default shape
+        function resetPot() {
+            initializePot();
+            targetWidth = 100;
+            targetHeight = 150;
+            currentWidth = 100;
+            currentHeight = 150;
+        }
+
+        // Save snapshot
+        function saveSnapshot() {
+            const dataURL = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.download = `pottery-${Date.now()}.png`;
+            link.href = dataURL;
+            link.click();
+        }
+    </script>
+</body>
+</html>
